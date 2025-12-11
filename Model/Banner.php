@@ -1,35 +1,28 @@
 <?php
 /**
- * Mageplaza
+ * Mageplaza_BetterSlider extension
+ *                     NOTICE OF LICENSE
  *
- * NOTICE OF LICENSE
- *
- * This source file is subject to the Mageplaza.com license that is
- * available through the world-wide-web at this URL:
+ *                     This source file is subject to the Mageplaza License
+ * that is bundled with this package in the file LICENSE.txt.
+ * It is also available through the world-wide-web at this URL:
  * https://www.mageplaza.com/LICENSE.txt
  *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade this extension to newer
- * version in the future.
- *
- * @category    Mageplaza
- * @package     Mageplaza_BannerSlider
- * @copyright   Copyright (c) Mageplaza (https://www.mageplaza.com/)
- * @license     https://www.mageplaza.com/LICENSE.txt
+ *                     @category  Mageplaza
+ *                     @package   Mageplaza_BetterSlider
+ *                     @copyright Copyright (c) 2016
+ *                     @license   https://www.mageplaza.com/LICENSE.txt
  */
-
-namespace Mageplaza\BannerSlider\Model;
+namespace Mageplaza\BetterSlider\Model;
 
 use Magento\Framework\Data\Collection\AbstractDb;
-use Magento\Framework\Model\AbstractModel;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Model\Context;
 use Magento\Framework\Model\ResourceModel\AbstractResource;
 use Magento\Framework\Registry;
-use Mageplaza\BannerSlider\Model\Config\Source\Image as configImage;
-use Mageplaza\BannerSlider\Model\ResourceModel\Slider\Collection;
-use Mageplaza\BannerSlider\Model\ResourceModel\Slider\CollectionFactory as sliderCollectionFactory;
-use Mageplaza\BannerSlider\Model\ResourceModel\Banner as ResourceBanner;
+use Magento\Framework\UrlInterface;
+use Magento\Store\Model\StoreManagerInterface;
+use Mageplaza\BetterSlider\Model\ResourceModel\Slider\CollectionFactory;
 
 /**
  * @method Banner setName($name)
@@ -39,89 +32,102 @@ use Mageplaza\BannerSlider\Model\ResourceModel\Banner as ResourceBanner;
  * @method Banner setStatus($status)
  * @method mixed getName()
  * @method mixed getUploadFile()
- * @method mixed getUrl()
  * @method mixed getType()
  * @method mixed getStatus()
- * @method Banner setCreatedAt(string $createdAt)
+ * @method Banner setCreatedAt(\string $createdAt)
  * @method string getCreatedAt()
- * @method Banner setUpdatedAt(string $updatedAt)
+ * @method Banner setUpdatedAt(\string $updatedAt)
  * @method string getUpdatedAt()
  * @method Banner setSlidersData(array $data)
  * @method array getSlidersData()
- * @method Banner setSlidersIds(array $sliderIds)
- * @method array getSlidersIds()
- * @method Banner setIsChangedSliderList(bool $flag)
+ * @method Banner setIsChangedSliderList(\bool $flag)
  * @method bool getIsChangedSliderList()
  * @method Banner setAffectedSliderIds(array $ids)
  * @method bool getAffectedSliderIds()
  */
-class Banner extends AbstractModel
+class Banner extends \Magento\Framework\Model\AbstractModel
 {
-    /**
-     * Cache tag
-     *
-     * @var string
-     */
-    const CACHE_TAG = 'mageplaza_bannerslider_banner';
+    const BASE_URL_PLACEHOLDER = '{{base_url}}';
 
     /**
      * Cache tag
      *
      * @var string
      */
-    protected $_cacheTag = 'mageplaza_bannerslider_banner';
+    const CACHE_TAG = 'mageplaza_betterslider_banner';
+
+    /**
+     * Cache tag
+     *
+     * @var string
+     */
+    protected $_cacheTag = 'mageplaza_betterslider_banner';
 
     /**
      * Event prefix
      *
      * @var string
      */
-    protected $_eventPrefix = 'mageplaza_bannerslider_banner';
+    protected $_eventPrefix = 'mageplaza_betterslider_banner';
 
     /**
      * Slider Collection
      *
-     * @var Collection
+     * @var \Mageplaza\BetterSlider\Model\ResourceModel\Slider\Collection
      */
     protected $sliderCollection;
 
     /**
      * Slider Collection Factory
      *
-     * @var sliderCollectionFactory
+     * @var CollectionFactory
+     */
+
+    protected $imageModel;
+    /**
+     * @var UrlInterface
+     */
+    private $urlBuilder;
+
+    /**
+     * @var CollectionFactory
      */
     protected $sliderCollectionFactory;
 
     /**
-     * @var configImage
+     * @var StoreManagerInterface
      */
-    protected $imageModel;
-    
+    protected $storeManager;
+
     /**
-     * Banner constructor.
+     * constructor
      *
-     * @param sliderCollectionFactory $sliderCollectionFactory
+     * @param CollectionFactory $sliderCollectionFactory
      * @param Context $context
      * @param Registry $registry
-     * @param configImage $configImage
+     * @param UrlInterface $urlBuilder
+     * @param StoreManagerInterface $storeManager
      * @param AbstractResource|null $resource
      * @param AbstractDb|null $resourceCollection
      * @param array $data
      */
     public function __construct(
-        sliderCollectionFactory $sliderCollectionFactory,
+        CollectionFactory $sliderCollectionFactory,
         Context $context,
         Registry $registry,
-        configImage $configImage,
-        AbstractResource $resource = null,
-        AbstractDb $resourceCollection = null,
+        UrlInterface $urlBuilder,
+        StoreManagerInterface $storeManager,
+        ?AbstractResource $resource = null,
+        ?AbstractDb $resourceCollection = null,
         array $data = []
-    ) {
+    )
+    {
         $this->sliderCollectionFactory = $sliderCollectionFactory;
-        $this->imageModel = $configImage;
-
         parent::__construct($context, $registry, $resource, $resourceCollection, $data);
+        $this->urlBuilder = $urlBuilder;
+        $this->storeManager = $storeManager;
     }
+
 
     /**
      * Initialize resource model
@@ -130,7 +136,7 @@ class Banner extends AbstractModel
      */
     protected function _construct()
     {
-        $this->_init(ResourceBanner::class);
+        $this->_init('Mageplaza\BetterSlider\Model\ResourceModel\Banner');
     }
 
     /**
@@ -150,50 +156,68 @@ class Banner extends AbstractModel
      */
     public function getDefaultValues()
     {
-        return ['status => 1', 'type' => '0'];
+        $values = [];
+        $values['type'] = '';
+        return $values;
+    }
+    /**
+     * @return array|mixed
+     */
+    public function getSlidersPosition()
+    {
+        if (!$this->getId()) {
+            return array();
+        }
+        $array = $this->getData('sliders_position');
+        if (is_null($array)) {
+            $array = $this->getResource()->getSlidersPosition($this);
+            $this->setData('sliders_position', $array);
+        }
+        return $array;
     }
 
     /**
-     * @return ResourceModel\Slider\Collection
+     * @return \Mageplaza\BetterSlider\Model\ResourceModel\Slider\Collection
      */
     public function getSelectedSlidersCollection()
     {
-        if ($this->sliderCollection === null) {
-            /** @var \Mageplaza\BannerSlider\Model\ResourceModel\Slider\Collection $collection */
+        if (is_null($this->sliderCollection)) {
             $collection = $this->sliderCollectionFactory->create();
-            $collection->getSelect()->join(
-                ['banner_slider' => $this->getResource()->getTable('mageplaza_bannerslider_banner_slider')],
-                'main_table.slider_id=banner_slider.slider_id AND banner_slider.banner_id=' . $this->getId(),
+            $collection->join(
+                'mageplaza_betterslider_banner_slider',
+                'main_table.slider_id=mageplaza_betterslider_banner_slider.slider_id AND mageplaza_betterslider_banner_slider.banner_id='.$this->getId(),
                 ['position']
             );
-            $collection->addFieldToFilter('status', 1);
+            $collection->addFieldToFilter('status',1);
 
             $this->sliderCollection = $collection;
         }
-
         return $this->sliderCollection;
     }
 
     /**
-     * get full image url
+     * get full banner url
      * @return string
      */
-    public function getImageUrl()
+    public function getBannerUrl()
     {
-        return $this->imageModel->getBaseUrl() . $this->getImage();
+        return $this->urlBuilder->getBaseUrl(['_type' => UrlInterface::URL_TYPE_MEDIA]).'mageplaza/betterslider/banner/image' . $this->getUploadFile();
     }
 
     /**
-     * @return array
+     * Get the banner-url and replace the base-url with the url of the current store.
+     *
+     * @throws NoSuchEntityException
      */
-    public function getSliderIds()
+    public function getUrl()
     {
-        if (!$this->hasData('slider_ids')) {
-            $ids = $this->getResource()->getSliderIds($this);
+        $url = $this->getData('url');
 
-            $this->setData('slider_ids', $ids);
+        if ($url && str_contains($url, self::BASE_URL_PLACEHOLDER)) {
+            $baseUrl = $this->storeManager->getStore()->getBaseUrl();
+            $url = str_replace(self::BASE_URL_PLACEHOLDER, $baseUrl, $url);
         }
 
-        return (array)$this->getData('slider_ids');
+        return $url;
     }
 }
